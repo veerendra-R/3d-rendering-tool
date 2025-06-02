@@ -53,56 +53,88 @@ export default function CanvasViewer() {
 
   const serializeMaterial = (mesh, type='custom', textureDataURL=null) => ({
     name: mesh.name,
+    uuid: mesh.uuid,
     color: mesh.material.color.getHex(),
     preset: type,
     textureDataURL,
+    roughness: mesh.material.roughness || 0.5,
+    metalness: mesh.material.metalness || 0.5,
   });
   
 
   const deserializeMaterial = (scene, saved) => {
-    const mesh = scene.getObjectByProperty('uuid', saved.uuid);
-    if (!mesh) return;
+    // Try to find by UUID first, then by name as fallback
+    let mesh = scene.getObjectByProperty('uuid', saved.uuid);
+    if (!mesh && saved.name) {
+      mesh = scene.getObjectByName(saved.name);
+    }
+    if (!mesh) {
+      console.warn('Could not find mesh for undo/redo:', saved.name || saved.uuid);
+      return;
+    }
+    
     const material = new THREE.MeshStandardMaterial({
       color: new THREE.Color(saved.color),
-      roughness: 0.5,
-      metalness: 0.5,
+      roughness: saved.roughness || 0.5,
+      metalness: saved.metalness || 0.5,
     });
+    
     if (saved.textureDataURL) {
       const texture = new THREE.TextureLoader().load(saved.textureDataURL);
       material.map = texture;
     }
+    
     mesh.material = material;
     mesh.material.needsUpdate = true;
   };
 
-  const pushUndo = async (mesh, preset = 'custom', textureFile = null) => {
-    let textureDataURL = null;
-    if (textureFile) {
-      textureDataURL = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.readAsDataURL(textureFile);
-      });
+  const pushUndo = async (mesh, preset = 'custom') => {
+    if (!mesh || !mesh.material) return;
+    
+    // Capture the CURRENT state before making changes
+    let currentTextureDataURL = null;
+    if (mesh.material.map && mesh.material.map.image) {
+      currentTextureDataURL = await getTextureDataUrl(mesh.material.map);
     }
-    const state = serializeMaterial(mesh, preset, textureDataURL);
-    setUndoHistory((prev) => [...prev, state]);
-    setRedoHistory([]);
+    
+    const currentState = serializeMaterial(mesh, preset, currentTextureDataURL);
+    setUndoHistory((prev) => [...prev, currentState]);
+    setRedoHistory([]); // Clear redo history when new action is performed
   };
 
-  const undo = () => {
-    const last = undoHistory[undoHistory.length - 1];
-    if (!last || !scene) return;
+  const undo = async () => {
+    if (undoHistory.length === 0 || !scene || !selectedMesh) return;
+    
+    // Get the state to restore
+    const stateToRestore = undoHistory[undoHistory.length - 1];
+    
+    // Capture current state for redo
+    let currentTextureDataURL = null;
+    if (selectedMesh.material.map && selectedMesh.material.map.image) {
+      currentTextureDataURL = await getTextureDataUrl(selectedMesh.material.map);
+    }
+    const currentState = serializeMaterial(selectedMesh, 'custom', currentTextureDataURL);
+    
+    // Update histories
     setUndoHistory((prev) => prev.slice(0, -1));
-    setRedoHistory((prev) => [...prev, last]);
-    deserializeMaterial(scene, last);
+    setRedoHistory((prev) => [...prev, currentState]);
+    
+    // Restore the previous state
+    deserializeMaterial(scene, stateToRestore);
   };
 
   const redo = () => {
-    const last = redoHistory[redoHistory.length - 1];
-    if (!last || !scene) return;
+    if (redoHistory.length === 0 || !scene) return;
+    
+    // Get the state to restore
+    const stateToRestore = redoHistory[redoHistory.length - 1];
+    
+    // Update histories
     setRedoHistory((prev) => prev.slice(0, -1));
-    setUndoHistory((prev) => [...prev, last]);
-    deserializeMaterial(scene, last);
+    setUndoHistory((prev) => [...prev, stateToRestore]);
+    
+    // Restore the state
+    deserializeMaterial(scene, stateToRestore);
   };
 
   const resetHistory = () => {
@@ -112,33 +144,33 @@ export default function CanvasViewer() {
     localStorage.removeItem('redoHistory');
   };
 
-  const applyColorToSelected = (hex) => {
+  const applyColorToSelected = async (hex) => {
     if (!selectedMesh || !selectedMesh.material) return;
-    pushUndo(selectedMesh);
+    await pushUndo(selectedMesh);
     selectedMesh.material.color = new THREE.Color(hex);
     selectedMesh.material.map = null;
     selectedMesh.material.needsUpdate = true;
   };
 
-  const applyMaterialPreset = (type) => {
+  const applyMaterialPreset = async (type) => {
     if (!selectedMesh) return;
-    pushUndo(selectedMesh, type);
+    await pushUndo(selectedMesh, type);
     let material;
     switch (type) {
-      case 'wood-light': material = new THREE.MeshStandardMaterial({ color: 0xfde68a }); break;
-      case 'wood-dark': material = new THREE.MeshStandardMaterial({ color: 0x7c3f00 }); break;
-      case 'metal': material = new THREE.MeshStandardMaterial({ color: 0xd1d5db }); break;
-      case 'metal-dark': material = new THREE.MeshStandardMaterial({ color: 0x4b5563 }); break;
-      case 'plastic': material = new THREE.MeshStandardMaterial({ color: 0xbfdbfe }); break;
+      case 'wood-light': material = new THREE.MeshStandardMaterial({ color: 0xfde68a, roughness: 0.8, metalness: 0.1 }); break;
+      case 'wood-dark': material = new THREE.MeshStandardMaterial({ color: 0x7c3f00, roughness: 0.8, metalness: 0.1 }); break;
+      case 'metal': material = new THREE.MeshStandardMaterial({ color: 0xd1d5db, roughness: 0.2, metalness: 0.9 }); break;
+      case 'metal-dark': material = new THREE.MeshStandardMaterial({ color: 0x4b5563, roughness: 0.2, metalness: 0.9 }); break;
+      case 'plastic': material = new THREE.MeshStandardMaterial({ color: 0xbfdbfe, roughness: 0.6, metalness: 0.1 }); break;
       default: return;
     }
     selectedMesh.material = material;
     selectedMesh.material.needsUpdate = true;
   };
 
-  const applyTextureToSelected = (file) => {
+  const applyTextureToSelected = async (file) => {
     if (!selectedMesh || !file) return;
-    pushUndo(selectedMesh, 'custom', file);
+    await pushUndo(selectedMesh, 'custom');
     const reader = new FileReader();
     reader.onload = (e) => {
       const textureData = e.target.result;
@@ -243,15 +275,37 @@ export default function CanvasViewer() {
 
   return (
     <main className="flex flex-col h-screen overflow-hidden">
-      {/* <header className="sticky top-0 z-10 bg-white border-b px-4 py-3 shadow">
-        <h1 className="text-xl font-bold text-gray-800">3D Model Editor</h1>
-        <p className="text-sm text-gray-600">Upload, customize and save your model</p>
-      </header> */}
       <div className="flex flex-1 min-h-0">
         <aside className="w-16 bg-[#111827] text-white flex flex-col items-center py-4 space-y-6">
-          <button className="text-xl hover:text-blue-400" onClick={undo}><FaUndoAlt /></button>
-          <button className="text-xl hover:text-blue-400" onClick={redo}><FaRedoAlt /></button>
-          <button className="text-xl hover:text-red-500"><FaTrash /></button>
+          <button 
+            className={`text-xl ${undoHistory.length > 0 ? 'hover:text-blue-400' : 'text-gray-500 cursor-not-allowed'}`} 
+            onClick={undo}
+            disabled={undoHistory.length === 0}
+          >
+            <FaUndoAlt />
+          </button>
+          <button 
+            className={`text-xl ${redoHistory.length > 0 ? 'hover:text-blue-400' : 'text-gray-500 cursor-not-allowed'}`} 
+            onClick={redo}
+            disabled={redoHistory.length === 0}
+          >
+            <FaRedoAlt />
+          </button>
+          <button
+            className={`text-xl ${modelUrl ? 'hover:text-red-500' : 'text-gray-500 cursor-not-allowed'}`}
+            onClick={() => {
+              setModelUrl(null);
+              setSelectedMesh(null);
+              setSelectedName(null);
+              setScene(null);
+              resetHistory();
+              // Remove from localStorage if needed:
+              localStorage.removeItem('modelKey');
+            }}
+            disabled={!modelUrl}
+          >
+            <FaTrash />
+          </button>
           <button className="text-xl hover:text-green-500" onClick={saveCurrentState}>
             <FaSave />
           </button>
@@ -339,13 +393,13 @@ export default function CanvasViewer() {
                         src={tex}
                         alt="texture"
                         className="w-10 h-10 rounded border cursor-pointer"
-                        onClick={() =>
-                          applyTextureToSelected({
-                            target: {
-                              files: [new File([tex], `texture${index}.png`, { type: 'image/png' })],
-                            },
-                          })
-                        }
+                        onClick={async () => {
+                          if (!selectedMesh) return;
+                          await pushUndo(selectedMesh, 'custom');
+                          const texture = new THREE.TextureLoader().load(tex);
+                          selectedMesh.material.map = texture;
+                          selectedMesh.material.needsUpdate = true;
+                        }}
                       />
                     ))}
                   </div>
