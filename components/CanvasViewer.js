@@ -25,9 +25,19 @@ export default function CanvasViewer() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('undoHistory', JSON.stringify(undoHistory));
-    localStorage.setItem('redoHistory', JSON.stringify(redoHistory));
+    try {
+      localStorage.setItem('undoHistory', JSON.stringify(undoHistory));
+      localStorage.setItem('redoHistory', JSON.stringify(redoHistory));
+    } catch (e) {
+      if (e.name === 'QuotaExceededError') {
+        // Optionally, clear history and notify user
+        setUndoHistory([]);
+        setRedoHistory([]);
+        alert('History exceeded storage limit and was cleared!');
+      }
+    }
   }, [undoHistory, redoHistory]);
+  
 
   useEffect(() => {
     if (!scene || !modelUrl) return;
@@ -88,19 +98,26 @@ export default function CanvasViewer() {
     mesh.material.needsUpdate = true;
   };
 
+  const MAX_HISTORY = 20; // You can tune this as you want
+
   const pushUndo = async (mesh, preset = 'custom') => {
     if (!mesh || !mesh.material) return;
-    
-    // Capture the CURRENT state before making changes
+  
     let currentTextureDataURL = null;
     if (mesh.material.map && mesh.material.map.image) {
       currentTextureDataURL = await getTextureDataUrl(mesh.material.map);
     }
-    
+  
     const currentState = serializeMaterial(mesh, preset, currentTextureDataURL);
-    setUndoHistory((prev) => [...prev, currentState]);
-    setRedoHistory([]); // Clear redo history when new action is performed
+  
+    setUndoHistory((prev) => {
+      const updated = [...prev, currentState];
+      if (updated.length > MAX_HISTORY) updated.shift(); // Remove oldest if exceeding max
+      return updated;
+    });
+    setRedoHistory([]);
   };
+  
 
   const undo = async () => {
     if (undoHistory.length === 0 || !scene || !selectedMesh) return;
