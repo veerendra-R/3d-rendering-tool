@@ -19,7 +19,7 @@ export default function CanvasViewer() {
   const [redoHistory, setRedoHistory] = useState([]);
   const [textureList, setTextureList] = useState([]);
 
-  // Only initialize from IndexedDB, not localStorage
+  // Initialize state from localStorage and restore history from IndexedDB
   useEffect(() => {
     setModelUrl(localStorage.getItem('modelUrl') || null);
     setTextureList(JSON.parse(localStorage.getItem('textureList') || '[]'));
