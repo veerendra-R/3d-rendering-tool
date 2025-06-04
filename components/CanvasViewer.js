@@ -6,9 +6,17 @@ import { OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { FaSave, FaUndoAlt, FaRedoAlt, FaTrash, FaUpload, FaImage, FaEye } from 'react-icons/fa';
 import { saveModelBlob, getModelBlob, saveModelState, getModelState } from '../app/utils/idb';
+import { Camera, Eye, Square, ArrowUp, ArrowLeft, ArrowRight } from 'lucide-react'; // for icons
 
 const MAX_HISTORY = 20;
 const HISTORY_KEY = 'historyState';
+const CAMERA_VIEWS = {
+  perspective: { position: [0, 0, 5], lookAt: [0, 0, 0] },
+  front:      { position: [0, 0, 5], lookAt: [0, 0, 0] },
+  top:        { position: [0, 5, 0], lookAt: [0, 0, 0] },
+  left:       { position: [-5, 0, 0], lookAt: [0, 0, 0] },
+  right:      { position: [5, 0, 0], lookAt: [0, 0, 0] }
+};
 
 export default function CanvasViewer() {
   const [selectedMesh, setSelectedMesh] = useState(null);
@@ -18,8 +26,23 @@ export default function CanvasViewer() {
   const [undoHistory, setUndoHistory] = useState([]);
   const [redoHistory, setRedoHistory] = useState([]);
   const [textureList, setTextureList] = useState([]);
+  const [meshParts, setMeshParts] = useState([]);
+  const [mode, setMode] = useState('view'); // or 'select'
 
-  // Initialize state from localStorage and restore history from IndexedDB
+  // Camera controls
+  const cameraRef = useRef();
+  const controlsRef = useRef();
+  const [cameraView, setCameraView] = useState('perspective');
+  
+  const cameraViews = {
+    perspective: { position: [0, 0, 5], lookAt: [0, 0, 0] },
+    front:      { position: [0, 0, 5], lookAt: [0, 0, 0] },
+    top:        { position: [0, 5, 0], lookAt: [0, 0, 0] },
+    left:       { position: [-5, 0, 0], lookAt: [0, 0, 0] },
+    right:      { position: [5, 0, 0], lookAt: [0, 0, 0] }
+  };
+
+  // Only initialize from IndexedDB, not localStorage
   useEffect(() => {
     setModelUrl(localStorage.getItem('modelUrl') || null);
     setTextureList(JSON.parse(localStorage.getItem('textureList') || '[]'));
@@ -238,7 +261,8 @@ export default function CanvasViewer() {
         if (file) {
           const blobUrl = URL.createObjectURL(file);
           setModelUrl(blobUrl);
-          // Material restoration is handled once the scene is available
+
+         // Material restoration is handled once the scene is available
         }
       }
     };
@@ -268,12 +292,71 @@ export default function CanvasViewer() {
     alert('Saved!');
   };
 
+  // Always highlight the selected mesh (whether chosen by click or dropdown)
+  useEffect(() => {
+    if (!scene) return;
+    scene.traverse((child) => {
+      if (child.isMesh && child.material?.emissive) {
+        if (child === selectedMesh) {
+          child.material.emissive.setHex(0x3b82f6);
+          child.material.emissiveIntensity = 0.3;
+        } else {
+          child.material.emissive.setHex(0x000000);
+          child.material.emissiveIntensity = 0;
+        }
+      }
+    });
+  }, [scene, selectedMesh]);
+
+
+  function CameraButton({ active, label, onClick, icon }) {
+    return (
+      <div className="relative group">
+        <button
+          onClick={onClick}
+          className={`flex items-center justify-center p-2 rounded transition 
+            ${active ? 'bg-blue-500 text-white' : 'bg-white text-gray-700'} 
+            hover:bg-blue-100 hover:text-blue-600 shadow`}
+          style={{ width: 36, height: 36 }}
+          aria-label={label}
+        >
+          {icon}
+        </button>
+        <span className="absolute left-1/2 -translate-x-1/2 top-full mt-1 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-90 pointer-events-none z-10 whitespace-nowrap">
+          {label}
+        </span>
+      </div>
+    );
+  }
   // ------------------------
   // UI & Rendering
   // ------------------------
-
   return (
     <main className="flex flex-col h-screen overflow-hidden">
+      <div className="flex gap-3 items-center p-2 bg-gray-100 border-b">
+        <button
+          onClick={() => setMode('select')}
+          className={`flex items-center gap-1 px-3 py-1 rounded-lg transition shadow
+            ${mode === 'select' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 hover:bg-blue-100'}
+          `}
+          title="Selection Mode"
+        >
+          <Square size={18} /> Select
+        </button>
+        <button
+          onClick={() => setMode('view')}
+          className={`flex items-center gap-1 px-3 py-1 rounded-lg transition shadow
+            ${mode === 'view' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 hover:bg-blue-100'}
+          `}
+          title="View Mode"
+        >
+          <Eye size={18} /> View
+        </button>
+        <span className="ml-4 text-gray-400 text-xs">
+          {mode === 'select' ? "Click 3D parts to select/edit" : "Click & drag to move, no selection"}
+        </span>
+      </div>
+
       <div className="flex flex-1 min-h-0">
         <aside className="w-16 bg-[#111827] text-white flex flex-col items-center py-4 space-y-6">
           <button
@@ -307,11 +390,31 @@ export default function CanvasViewer() {
           <button className="text-xl hover:text-green-500" onClick={saveCurrentState}>
             <FaSave />
           </button>
+          <button
+            className="mt-4 text-2xl hover:text-blue-400"
+            title="Unselect part (preview full model)"
+            onClick={() => {
+              setSelectedMesh(null);
+              setSelectedName(null);
+            }}
+          >
+            <FaEye />
+          </button>
         </aside>
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           <div className="flex-1 relative h-full">
-            <Canvas camera={{ position: [0, 0, 5], fov: 45 }} onCreated={({ scene }) => setScene(scene)}>
+            <Canvas
+              onCreated={({ scene, camera }) => {
+                setScene(scene);
+                cameraRef.current = camera;
+              }}
+            >
+              <CameraUpdater
+                view={CAMERA_VIEWS[cameraView]}
+                cameraRef={cameraRef}
+                controlsRef={controlsRef}
+              />
               <color attach="background" args={['#f3f4f6']} />
               <ambientLight intensity={0.5} />
               <directionalLight position={[2, 2, 2]} intensity={1} />
@@ -323,6 +426,8 @@ export default function CanvasViewer() {
                     setSelectedMesh={setSelectedMesh}
                     setSelectedName={setSelectedName}
                     setScene={setScene}
+                    setMeshParts={setMeshParts}
+                    mode={mode}
                   />
                 }
               </Suspense>
@@ -339,6 +444,28 @@ export default function CanvasViewer() {
             )}
           </div>
           <div className="w-full md:w-80 bg-white p-4 shadow-lg overflow-y-auto">
+            {modelUrl && meshParts.length > 0 && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Part</label>
+                <select
+                  className="w-full border px-2 py-1 rounded mb-2"
+                  value={selectedMesh ? selectedMesh.name : ""}
+                  onChange={e => {
+                    const part = meshParts.find(m => m.name === e.target.value);
+                    if (part && scene) {
+                      const mesh = scene.getObjectByName(part.name);
+                      setSelectedMesh(mesh);
+                      setSelectedName(mesh.name);
+                    }
+                  }}
+                >
+                  <option value="" disabled>Select a part...</option>
+                  {meshParts.map(part => (
+                    <option key={part.uuid} value={part.name}>{part.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             {modelUrl && selectedMesh ? (
               <>
                 <h2 className="font-semibold text-lg mb-2">{selectedName}</h2>
@@ -431,18 +558,37 @@ export default function CanvasViewer() {
   );
 }
 
-function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene }) {
+// CameraUpdater helper: updates camera position and lookAt when view changes
+function CameraUpdater({ view, cameraRef, controlsRef }) {
+  useEffect(() => {
+    if (cameraRef.current) {
+      cameraRef.current.position.set(...view.position);
+      cameraRef.current.lookAt(...view.lookAt);
+      cameraRef.current.updateProjectionMatrix();
+      if (controlsRef.current) {
+        controlsRef.current.target.set(...view.lookAt);
+        controlsRef.current.update();
+      }
+    }
+  }, [view, cameraRef, controlsRef]);
+  return null;
+}
+
+
+function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene ,setMeshParts,mode}) {
   const { scene } = useGLTF(url);
   useEffect(() => {
+    let meshList = [];
     scene.traverse((obj, idx) => {
       if (obj.isMesh) {
         if (!obj.name || obj.name === '') obj.name = `part_${idx}`;
+        meshList.push({ name: obj.name, uuid: obj.uuid });
       }
     });
+    setMeshParts(meshList);
     setScene(scene);
-    // Expose scene globally for debugging and legacy hooks
     window.threeScene = scene;
-  }, [scene, setScene]);
+  }, [scene, setScene, setMeshParts]);
 
   const ref = useRef();
   const { gl, camera } = useThree();
@@ -452,6 +598,8 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene }
   useFrame(() => { gl.domElement.style.cursor = 'pointer'; });
 
   const onClick = useCallback((event) => {
+    if (mode !== 'select') return;  // Ignore clicks in view mode!
+    // ...rest of your selection logic...
     const bounds = gl.domElement.getBoundingClientRect();
     mouse.current.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
     mouse.current.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
@@ -461,20 +609,36 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene }
       const clicked = intersects[0].object;
       setSelectedMesh(clicked);
       setSelectedName(clicked.name || 'Unnamed Part');
-      if (clicked.material?.emissive) {
-        clicked.material.emissive.setHex(0x3b82f6);
-        clicked.material.emissiveIntensity = 0.3;
-      }
     }
-  }, [camera, gl, scene, setSelectedMesh, setSelectedName]);
-
+  }, [camera, gl, scene, setSelectedMesh, setSelectedName, mode]);
+  
+  // 🔥 Highlight effect
+  useEffect(() => {
+    if (!scene) return;
+    scene.traverse((child) => {
+      if (child.isMesh && child.material?.emissive) {
+        if (child === selectedMesh) {
+          child.material.emissive.setHex(0x3b82f6);
+          child.material.emissiveIntensity = 0.3;
+        } else {
+          child.material.emissive.setHex(0x000000);
+          child.material.emissiveIntensity = 0;
+        }
+      }
+    });
+  }, [scene, selectedMesh]);
+  
   useFrame(() => {
     scene.traverse((child) => {
       if (child.isMesh && child !== selectedMesh && child.material?.emissive) {
         child.material.emissive.setHex(0x000000);
         child.material.emissiveIntensity = 0;
       }
+      
     });
+    if (gl && gl.domElement) {
+      gl.domElement.style.cursor = mode === 'select' ? 'pointer' : 'grab';
+    }
   });
 
   // Restore material state on load
