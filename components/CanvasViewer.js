@@ -238,25 +238,7 @@ export default function CanvasViewer() {
         if (file) {
           const blobUrl = URL.createObjectURL(file);
           setModelUrl(blobUrl);
-
-          // Wait until scene is ready, then apply saved materials
-          setTimeout(async () => {
-            const saved = await getModelState('modelState');
-            if (saved && window.threeScene) {
-              const { materials } = saved;
-              materials.forEach(({ uuid, color, texture }) => {
-                const mesh = window.threeScene.getObjectByProperty('uuid', uuid);
-                if (mesh && mesh.material) {
-                  mesh.material.color = new THREE.Color(color);
-                  if (texture) {
-                    const tex = new THREE.TextureLoader().load(texture);
-                    mesh.material.map = tex;
-                  }
-                  mesh.material.needsUpdate = true;
-                }
-              });
-            }
-          }, 1000);
+          // Material restoration is handled once the scene is available
         }
       }
     };
@@ -458,6 +440,8 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene }
       }
     });
     setScene(scene);
+    // Expose scene globally for debugging and legacy hooks
+    window.threeScene = scene;
   }, [scene, setScene]);
 
   const ref = useRef();
