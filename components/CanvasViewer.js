@@ -6,7 +6,17 @@ import { OrbitControls, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { FaSave, FaUndoAlt, FaRedoAlt, FaTrash, FaUpload, FaImage, FaEye } from 'react-icons/fa';
 import { saveModelBlob, getModelBlob, saveModelState, getModelState } from '../app/utils/idb';
-import { Camera, Eye, Square, ArrowUp, ArrowLeft, ArrowRight } from 'lucide-react'; // for icons
+import {
+  Undo2,
+  Redo2,
+  Trash2,
+  Save,
+  Upload,
+  Image as LucideImage,
+  Eye,
+  Square,
+} from 'lucide-react';
+
 
 const MAX_HISTORY = 20;
 const HISTORY_KEY = 'historyState';
@@ -296,7 +306,19 @@ export default function CanvasViewer() {
   useEffect(() => {
     if (!scene) return;
     scene.traverse((child) => {
-      if (child.isMesh && child.material?.emissive) {
+      if (child.isMesh) {
+        // If not MeshStandardMaterial, convert
+        if (!child.material.emissive) {
+          const prev = child.material;
+          const stdMat = new THREE.MeshStandardMaterial({
+            color: prev.color ? prev.color.clone() : new THREE.Color(0xffffff),
+            map: prev.map || null,
+            metalness: prev.metalness !== undefined ? prev.metalness : 0.5,
+            roughness: prev.roughness !== undefined ? prev.roughness : 0.5,
+          });
+          child.material = stdMat;
+          child.material.needsUpdate = true;
+        }
         if (child === selectedMesh) {
           child.material.emissive.setHex(0x3b82f6);
           child.material.emissiveIntensity = 0.3;
@@ -307,6 +329,7 @@ export default function CanvasViewer() {
       }
     });
   }, [scene, selectedMesh]);
+  
 
 
   function CameraButton({ active, label, onClick, icon }) {
@@ -333,74 +356,72 @@ export default function CanvasViewer() {
   // ------------------------
   return (
     <main className="flex flex-col h-screen overflow-hidden">
-      <div className="flex gap-3 items-center p-2 bg-gray-100 border-b">
-        <button
-          onClick={() => setMode('select')}
-          className={`flex items-center gap-1 px-3 py-1 rounded-lg transition shadow
-            ${mode === 'select' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 hover:bg-blue-100'}
-          `}
-          title="Selection Mode"
-        >
-          <Square size={18} /> Select
-        </button>
-        <button
-          onClick={() => setMode('view')}
-          className={`flex items-center gap-1 px-3 py-1 rounded-lg transition shadow
-            ${mode === 'view' ? 'bg-blue-500 text-white' : 'bg-white text-gray-700 hover:bg-blue-100'}
-          `}
-          title="View Mode"
-        >
-          <Eye size={18} /> View
-        </button>
-        <span className="ml-4 text-gray-400 text-xs">
-          {mode === 'select' ? "Click 3D parts to select/edit" : "Click & drag to move, no selection"}
-        </span>
-      </div>
-
       <div className="flex flex-1 min-h-0">
-        <aside className="w-16 bg-[#111827] text-white flex flex-col items-center py-4 space-y-6">
+      <aside className="w-16 bg-[#111827] text-white flex flex-col items-center py-4 space-y-4">
+        {/* Mode toggle buttons */}
+        <div className="flex flex-col gap-2 mb-6">
           <button
-            className={`text-xl ${undoHistory.length > 0 ? 'hover:text-blue-400' : 'text-gray-500 cursor-not-allowed'}`}
-            onClick={undo}
-            disabled={undoHistory.length === 0}
+            onClick={() => setMode('select')}
+            className={`flex items-center justify-center w-10 h-10 rounded-lg transition
+              ${mode === 'select' ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 hover:bg-blue-100'}
+            `}
+            title="Selection Mode"
           >
-            <FaUndoAlt />
-          </button>
-          <button
-            className={`text-xl ${redoHistory.length > 0 ? 'hover:text-blue-400' : 'text-gray-500 cursor-not-allowed'}`}
-            onClick={redo}
-            disabled={redoHistory.length === 0}
-          >
-            <FaRedoAlt />
+            <Square size={20} />
           </button>
           <button
-            className={`text-xl ${modelUrl ? 'hover:text-red-500' : 'text-gray-500 cursor-not-allowed'}`}
-            onClick={() => {
-              setModelUrl(null);
-              setSelectedMesh(null);
-              setSelectedName(null);
-              setScene(null);
-              resetHistory();
-              localStorage.removeItem('modelKey');
-            }}
-            disabled={!modelUrl}
+            onClick={() => setMode('view')}
+            className={`flex items-center justify-center w-10 h-10 rounded-lg transition
+              ${mode === 'view' ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 hover:bg-blue-100'}
+            `}
+            title="View Mode"
           >
-            <FaTrash />
+            <Eye size={20} />
           </button>
-          <button className="text-xl hover:text-green-500" onClick={saveCurrentState}>
-            <FaSave />
-          </button>
-          <button
-            className="mt-4 text-2xl hover:text-blue-400"
-            title="Unselect part (preview full model)"
-            onClick={() => {
-              setSelectedMesh(null);
-              setSelectedName(null);
-            }}
-          >
-            <FaEye />
-          </button>
-        </aside>
+        </div>
+        {/* Undo */}
+        <button
+          className={`text-xl ${undoHistory.length > 0 ? 'hover:text-blue-400' : 'text-gray-500 cursor-not-allowed'}`}
+          onClick={undo}
+          disabled={undoHistory.length === 0}
+          title="Undo"
+        >
+          <Undo2 size={22} />
+        </button>
+        {/* Redo */}
+        <button
+          className={`text-xl ${redoHistory.length > 0 ? 'hover:text-blue-400' : 'text-gray-500 cursor-not-allowed'}`}
+          onClick={redo}
+          disabled={redoHistory.length === 0}
+          title="Redo"
+        >
+          <Redo2 size={22} />
+        </button>
+        {/* Delete */}
+        <button
+          className={`text-xl ${modelUrl ? 'hover:text-red-500' : 'text-gray-500 cursor-not-allowed'}`}
+          onClick={() => {
+            setModelUrl(null);
+            setSelectedMesh(null);
+            setSelectedName(null);
+            setScene(null);
+            resetHistory();
+            localStorage.removeItem('modelKey');
+          }}
+          disabled={!modelUrl}
+          title="Clear/Remove Model"
+        >
+          <Trash2 size={22} />
+        </button>
+        {/* Save */}
+        <button
+          className="text-xl hover:text-green-500"
+          onClick={saveCurrentState}
+          title="Save"
+        >
+          <Save size={22} />
+        </button>
+      </aside>
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           <div className="flex-1 relative h-full">
@@ -436,10 +457,19 @@ export default function CanvasViewer() {
             {!modelUrl && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white bg-opacity-90 text-center p-4">
                 <p className="text-gray-600 mb-4">Drag and drop a .glb/.gltf file here</p>
-                <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                  <FaUpload /> Browse Files
+                <label
+                  htmlFor="file-upload"
+                  className="cursor-pointer flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                >
+                  <Upload size={18} /> Browse Files
                 </label>
-                <input id="file-upload" type="file" accept=".glb,.gltf" onChange={handleBrowse} className="hidden" />
+                <input
+                  id="file-upload"
+                  type="file"
+                  accept=".glb,.gltf"
+                  onChange={handleBrowse}
+                  className="hidden"
+                />
               </div>
             )}
           </div>
@@ -454,9 +484,22 @@ export default function CanvasViewer() {
                     const part = meshParts.find(m => m.name === e.target.value);
                     if (part && scene) {
                       const mesh = scene.getObjectByName(part.name);
+                      // Ensure highlight works!
+                      if (mesh && !mesh.material.emissive) {
+                        const prev = mesh.material;
+                        const stdMat = new THREE.MeshStandardMaterial({
+                          color: prev.color ? prev.color.clone() : new THREE.Color(0xffffff),
+                          map: prev.map || null,
+                          metalness: prev.metalness !== undefined ? prev.metalness : 0.5,
+                          roughness: prev.roughness !== undefined ? prev.roughness : 0.5,
+                        });
+                        mesh.material = stdMat;
+                        mesh.material.needsUpdate = true;
+                      }
                       setSelectedMesh(mesh);
                       setSelectedName(mesh.name);
                     }
+                    
                   }}
                 >
                   <option value="" disabled>Select a part...</option>
@@ -598,8 +641,7 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene ,
   useFrame(() => { gl.domElement.style.cursor = 'pointer'; });
 
   const onClick = useCallback((event) => {
-    if (mode !== 'select') return;  // Ignore clicks in view mode!
-    // ...rest of your selection logic...
+    if (mode !== 'select') return;
     const bounds = gl.domElement.getBoundingClientRect();
     mouse.current.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
     mouse.current.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
@@ -607,16 +649,29 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene ,
     const intersects = raycaster.current.intersectObjects(scene.children, true);
     if (intersects.length > 0) {
       const clicked = intersects[0].object;
+      // 🟢 Ensure always using MeshStandardMaterial for highlight support
+      if (!clicked.material.emissive) {
+        const prev = clicked.material;
+        const stdMat = new THREE.MeshStandardMaterial({
+          color: prev.color ? prev.color.clone() : new THREE.Color(0xffffff),
+          map: prev.map || null,
+          metalness: prev.metalness !== undefined ? prev.metalness : 0.5,
+          roughness: prev.roughness !== undefined ? prev.roughness : 0.5,
+        });
+        clicked.material = stdMat;
+        clicked.material.needsUpdate = true;
+      }
       setSelectedMesh(clicked);
       setSelectedName(clicked.name || 'Unnamed Part');
     }
   }, [camera, gl, scene, setSelectedMesh, setSelectedName, mode]);
   
+  
   // 🔥 Highlight effect
   useEffect(() => {
     if (!scene) return;
     scene.traverse((child) => {
-      if (child.isMesh && child.material?.emissive) {
+      if (child.isMesh && child.material && child.material.emissive) {
         if (child === selectedMesh) {
           child.material.emissive.setHex(0x3b82f6);
           child.material.emissiveIntensity = 0.3;
@@ -627,6 +682,8 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene ,
       }
     });
   }, [scene, selectedMesh]);
+  
+  
   
   useFrame(() => {
     scene.traverse((child) => {
@@ -658,6 +715,37 @@ function Model({ url, selectedMesh, setSelectedMesh, setSelectedName, setScene ,
       });
     })();
   }, [scene]);
+  // Auto-unselect if user switches to view mode
+  useEffect(() => {
+    if (mode === 'view') {
+      setSelectedMesh(null);
+      setSelectedName(null);
+    }
+  }, [mode]);
 
+  useEffect(() => {
+    if (!scene) return;
+    scene.traverse((child, idx) => {
+      if (child.isMesh) {
+        // Always assign a unique material
+        let prev = child.material;
+        if (!(prev instanceof THREE.MeshStandardMaterial)) {
+          // If the original is not standard, convert
+          prev = new THREE.MeshStandardMaterial({
+            color: prev.color ? prev.color.clone() : new THREE.Color(0xffffff),
+            map: prev.map || null,
+            metalness: prev.metalness !== undefined ? prev.metalness : 0.5,
+            roughness: prev.roughness !== undefined ? prev.roughness : 0.5,
+          });
+        } else {
+          // Otherwise, clone it so it's unique
+          prev = prev.clone();
+        }
+        child.material = prev;
+        child.material.needsUpdate = true;
+      }
+    });
+  }, [scene]);
+  
   return <primitive object={scene} ref={ref} onClick={onClick} dispose={null} />;
 }
