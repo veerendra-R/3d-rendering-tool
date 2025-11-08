@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { openDB } from 'idb';
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import GlobalLoader from "../components/GlobalLoader";
 
 const MAX_HISTORY = 20;
 const HISTORY_KEY = 'historyState';
@@ -43,6 +46,9 @@ export default function CanvasViewer() {
   const [activeVersion, setActiveVersion] = useState('Version1');
   const [originalMaterials, setOriginalMaterials] = useState([]);
   const canvasWrapperRef = useRef(null);
+  const [isModelLoading, setIsModelLoading] = useState(false);
+  const router = useRouter();
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
 
   // Camera controls
   const cameraRef = useRef();
@@ -404,75 +410,113 @@ export default function CanvasViewer() {
 
   const deleteVersion = async (versionName) => {
     const versionKeys = Object.keys(versions);
-    if (versionKeys.length <= 1) {
-      if (confirm(`Delete ${versionName}? This will clear all data.`)) {
-        await clearAllStorageAndDB();
-        localStorage.clear();
-        setVersions({});
-        setActiveVersion('Version1');
-        setModelUrl(null);
-        setScene(null);
-        setSelectedMesh(null);
-        setUndoHistory([]);
-        setRedoHistory([]);
-        if (scene) scene.clear();
-        alert('All versions and model data cleared.');
-      }
-      return;
-    }
 
-    if (confirm(`Delete ${versionName}?`)) {
-      // Remove the version
-      const updated = { ...versions };
-      delete updated[versionName];
+    // Create a confirmation toast
+    toast.custom((t) => (
+      <div className="bg-white border border-gray-200 shadow-lg rounded-xl p-4 flex flex-col gap-3 w-[280px]">
+        <p className="text-gray-800 font-medium text-center">
+          {versionKeys.length <= 1
+            ? `Delete ${versionName}? This will clear all data.`
+            : `Delete ${versionName}?`}
+        </p>
 
-      // Reindex remaining versions as Version1, Version2, ...
-      const reindexed = {};
-      Object.keys(updated)
-        .sort((a, b) => {
-          const na = parseInt(a.replace('Version', '')) || 0;
-          const nb = parseInt(b.replace('Version', '')) || 0;
-          return na - nb;
-        })
-        .forEach((oldName, i) => {
-          const newName = `Version${i + 1}`;
-          reindexed[newName] = updated[oldName];
-        });
+        <div className="flex justify-center gap-3 mt-2">
+          <button
+            className="px-3 py-1.5 text-sm rounded-md bg-gray-100 hover:bg-gray-200 transition"
+            onClick={() => toast.dismiss(t.id)}
+          >
+            Cancel
+          </button>
+          <button
+            className="px-3 py-1.5 text-sm rounded-md bg-red-500 text-white hover:bg-red-600 transition"
+            onClick={async () => {
+              toast.dismiss(t.id);
+              const toastId = toast.loading("Deleting version...");
 
-      // Pick new active version
-      const nextActive = Object.keys(reindexed)[0];
+              try {
+                if (versionKeys.length <= 1) {
+                  await clearAllStorageAndDB();
+                  localStorage.clear();
+                  setVersions({});
+                  setActiveVersion("Version1");
+                  setModelUrl(null);
+                  setScene(null);
+                  setSelectedMesh(null);
+                  setUndoHistory([]);
+                  setRedoHistory([]);
+                  if (scene) scene.clear();
+                  toast.success("All versions and model data cleared.", {
+                    id: toastId,
+                  });
+                  return;
+                }
 
-      setVersions(reindexed);
-      setActiveVersion(nextActive);
+                // Normal version delete flow
+                const updated = { ...versions };
+                delete updated[versionName];
 
-      await saveModelState('modelVersions', {
-        versions: reindexed,
-        activeVersion: nextActive,
-      });
+                // Reindex remaining versions
+                const reindexed = {};
+                Object.keys(updated)
+                  .sort((a, b) => {
+                    const na = parseInt(a.replace("Version", "")) || 0;
+                    const nb = parseInt(b.replace("Version", "")) || 0;
+                    return na - nb;
+                  })
+                  .forEach((oldName, i) => {
+                    const newName = `Version${i + 1}`;
+                    reindexed[newName] = updated[oldName];
+                  });
 
-      // Apply new version’s materials immediately
-      if (scene && reindexed[nextActive]?.materials) {
-        scene.traverse((child) => {
-          if (child.isMesh) {
-            const base = reindexed[nextActive].materials.find(m => m.name === child.name);
-            const mat = new THREE.MeshStandardMaterial({
-              color: new THREE.Color(base?.color || 0xffffff),
-            });
-            if (base?.textureDataURL) {
-              mat.map = ((url) => {
-                const tex = loadTex(url);
-                tex.encoding = THREE.sRGBEncoding;
-                tex.flipY = false;
-                return tex;
-              })(base.textureDataURL);
-            }
-            child.material = mat;
-            child.material.needsUpdate = true;
-          }
-        });
-      }
-    }
+                const nextActive = Object.keys(reindexed)[0];
+                setVersions(reindexed);
+                setActiveVersion(nextActive);
+
+                await saveModelState("modelVersions", {
+                  versions: reindexed,
+                  activeVersion: nextActive,
+                });
+
+                // Apply new version materials
+                if (scene && reindexed[nextActive]?.materials) {
+                  scene.traverse((child) => {
+                    if (child.isMesh) {
+                      const base = reindexed[nextActive].materials.find(
+                        (m) => m.name === child.name
+                      );
+                      const mat = new THREE.MeshStandardMaterial({
+                        color: new THREE.Color(base?.color || 0xffffff),
+                      });
+                      if (base?.textureDataURL) {
+                        mat.map = ((url) => {
+                          const tex = loadTex(url);
+                          tex.encoding = THREE.sRGBEncoding;
+                          tex.flipY = false;
+                          return tex;
+                        })(base.textureDataURL);
+                      }
+                      child.material = mat;
+                      child.material.needsUpdate = true;
+                    }
+                  });
+                }
+
+                toast.success(`${versionName} deleted successfully.`, {
+                  id: toastId,
+                });
+              } catch (err) {
+                console.error("Delete version failed:", err);
+                toast.error("Failed to delete version.", { id: toastId });
+              }
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    ));
   };
+
 
 
   const handleAddVersion = async () => {
@@ -732,16 +776,24 @@ export default function CanvasViewer() {
   // Model loading and saving
   // --------------------------
 
-  const handleBrowse = useCallback(async (e) => {
-    const file = e.target.files[0];
-    if (!file || !file.name.match(/\.(glb|gltf)$/)) return;
-    const modelKey = 'uploadedModel';
-    await saveModelBlob(modelKey, file);
-    const blobUrl = URL.createObjectURL(file);
-    setModelUrl(blobUrl);
-    localStorage.setItem('modelKey', modelKey);
-    resetHistory();
-  }, []);
+const handleBrowse = useCallback(async (e) => {
+  const file = e.target.files[0];
+  if (!file || !file.name.match(/\.(glb|gltf)$/)) return;
+  
+  setIsGlobalLoading(true);
+
+  const modelKey = "uploadedModel";
+  await saveModelBlob(modelKey, file);
+  const blobUrl = URL.createObjectURL(file);
+  setModelUrl(blobUrl);
+  localStorage.setItem("modelKey", modelKey);
+  resetHistory();
+
+  // slight delay to make loader smooth
+  setTimeout(() => setIsGlobalLoading(false), 1200);
+}, []);
+
+
 
 
   const collectMaterialStates = async (root) => {
@@ -764,36 +816,65 @@ export default function CanvasViewer() {
   };
 
   const saveCurrentState = async () => {
-    if (!modelUrl || !scene) return;
-    const materials = await collectMaterialStates(scene);
-
-    setVersions((prev) => ({
-      ...prev,
-     [activeVersion]: {
-      ...prev[activeVersion],
-      materials,
-      undoHistory,
-      redoHistory,
-      textureList,
+    if (!modelUrl || !scene) {
+      toast.error("No model loaded.", {
+        description: "Upload a 3D model before saving a version.",
+      });
+      return;
     }
-    }));
 
-    await saveModelState('modelVersions', {
-      versions: {
-        ...versions,
+    // Start loading toast
+    setIsGlobalLoading(true);
+    toast.message(`Saving ${activeVersion}...`);
+
+    try {
+      // Collect all material data from scene
+      const materials = await collectMaterialStates(scene);
+
+      // Update state in memory
+      setVersions((prev) => ({
+        ...prev,
         [activeVersion]: {
-          modelUrl,
+          ...prev[activeVersion],
           materials,
           undoHistory,
           redoHistory,
           textureList,
         },
-      },
-      activeVersion,
-    });
-    await refreshModelUrlFromDB();
-    alert(`Saved ${activeVersion} successfully!`);
+      }));
+
+      // Persist to IndexedDB
+      await saveModelState("modelVersions", {
+        versions: {
+          ...versions,
+          [activeVersion]: {
+            modelUrl,
+            materials,
+            undoHistory,
+            redoHistory,
+            textureList,
+          },
+        },
+        activeVersion,
+      });
+
+      // Optional: Refresh the blob URL from DB
+      await refreshModelUrlFromDB();
+
+      // Success notification
+      toast.success(`${activeVersion} saved successfully!`, {
+        id: toastId,
+        description: "Your version changes are stored safely in local storage.",
+      });
+    } catch (err) {
+      console.error("Save failed:", err);
+      toast.error("Failed to save version.", {
+        id: toastId,
+        description: "An error occurred while saving your progress.",
+      });
+    }
   };
+
 
   const updateActiveVersionState = async () => {
     if (!scene || !activeVersion) return;
@@ -839,12 +920,38 @@ export default function CanvasViewer() {
 
   return (
     <main className="flex flex-col h-screen bg-[#FAF4ED] text-gray-800 overflow-hidden">
+      {isModelLoading && (
+          <div className="absolute inset-0 z-[9999] flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm">
+            <div className="w-12 h-12 border-4 border-t-[#4ADE80] border-gray-300 rounded-full animate-spin mb-3" />
+            <p className="text-gray-700 font-medium">Publishing your model...</p>
+          </div>
+        )}
+
       {/* --- Header --- */}
       <header className="flex justify-between items-center px-8 py-4 bg-white shadow-sm border-b border-gray-200">
         <h1 className="text-2xl font-bold text-gray-800">
           3D Model Customizer
         </h1>
-        <button className="bg-[#4ADE80] text-white px-5 py-2 rounded-full font-medium hover:bg-[#3fd270] transition">
+        <button 
+          className="bg-[#4ADE80] text-white px-5 py-2 rounded-full font-medium hover:bg-[#3fd270] transition"
+          onClick={() => {
+            setIsGlobalLoading(true);
+            toast.promise(
+              new Promise((resolve) => {
+                setTimeout(() => {
+                  router.push("/marketplace");
+                  resolve();
+                }, 1500);
+              }),
+              {
+                loading: "Publishing model...",
+                success: "Model published successfully!",
+                error: "Failed to publish model.",
+              }
+            );
+            setTimeout(() => setIsGlobalLoading(false), 1500);
+          }}
+        >
           Publish
         </button>
       </header>
@@ -927,6 +1034,7 @@ export default function CanvasViewer() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           <div className="flex-1 relative overflow-hidden bg-[#FAF4ED]">
             <div ref={canvasWrapperRef} className="absolute inset-0">
+              
               <Canvas
                 className="w-full h-full"
                 gl={{
@@ -970,9 +1078,14 @@ export default function CanvasViewer() {
                 </Suspense>
                 <OrbitControls enablePan enableZoom panSpeed={1.2} zoomSpeed={1.2} />
               </Canvas>
-
+              {isModelLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm z-50">
+                  <div className="w-10 h-10 border-4 border-t-[#4ADE80] border-gray-300 rounded-full animate-spin" />
+                  <span className="ml-3 text-gray-700 font-medium">Loading model...</span>
+                </div>
+              )}
               {/* Empty State */}
-              {!modelUrl && (
+              {!modelUrl && !isModelLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 text-center p-4 rounded-xl shadow-inner">
                   <p className="text-gray-600 mb-4">Drag and drop a .glb/.gltf file here</p>
                   <label
