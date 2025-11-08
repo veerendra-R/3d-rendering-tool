@@ -823,16 +823,15 @@ const handleBrowse = useCallback(async (e) => {
       return;
     }
 
-    // Start loading toast
+    const toastId = toast.loading(`Saving ${activeVersion}...`);
     setIsGlobalLoading(true);
-    toast.message(`Saving ${activeVersion}...`);
 
     try {
       // Collect all material data from scene
       const materials = await collectMaterialStates(scene);
 
-      // Update state in memory
-      setVersions((prev) => ({
+      // Update local state
+      setVersions(prev => ({
         ...prev,
         [activeVersion]: {
           ...prev[activeVersion],
@@ -858,13 +857,12 @@ const handleBrowse = useCallback(async (e) => {
         activeVersion,
       });
 
-      // Optional: Refresh the blob URL from DB
+      // Refresh model blob if needed
       await refreshModelUrlFromDB();
 
-      // Success notification
       toast.success(`${activeVersion} saved successfully!`, {
         id: toastId,
-        description: "Your version changes are stored safely in local storage.",
+        description: "Your version has been stored locally.",
       });
     } catch (err) {
       console.error("Save failed:", err);
@@ -872,6 +870,8 @@ const handleBrowse = useCallback(async (e) => {
         id: toastId,
         description: "An error occurred while saving your progress.",
       });
+    } finally {
+      setIsGlobalLoading(false);
     }
   };
 
